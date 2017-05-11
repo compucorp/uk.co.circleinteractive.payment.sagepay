@@ -71,7 +71,7 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
             case 'select':
             case 'get':
                 if ($data = CRM_Core_DAO::singleValueQuery("
-                   SELECT data FROM civicrm_sagepay WHERE data_type = %1 AND entity_id = %2    
+                   SELECT data FROM civicrm_sagepay WHERE data_type = %1 AND entity_id = %2
                 ", array(
                       1 => array($data_type, 'String'),
                       2 => array($params['entity_id'], 'Integer')
@@ -253,6 +253,10 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
 
         }
 
+        if (!empty($params['contributionID'])) {
+            $this->createPendingTransaction($params['contributionID']);
+        }
+
         // Construct notification url
         $querystring = array();
         foreach ($notifyParams as $key => $value)
@@ -294,6 +298,21 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
             }
             $contact = $contact[$cid];
 
+        }
+
+        // Use billing address when configured to via setting
+        if ($use_billing = CRM_Core_BAO_Setting::getItem('uk.co.circleinteractive.payment.sagepay', 'use_billing')) {
+            $location_type_id = CRM_Core_DAO::singleValueQuery("SELECT id FROM civicrm_location_type WHERE name = 'Billing'");
+            try {
+                $address = civicrm_api3('address', 'get', array(
+                    'contact_id'       => $cid,
+                    'location_type_id' => $location_type_id
+                ));
+                if ($address['values'])
+                    $address = reset($address['values']);
+            } catch (CiviCRM_API3_Exception $e) {
+                CRM_Core_Error::fatal('Unable to get billing address for the current contact');
+            }
         }
 
         // Query ISO Country code for this country_id ..
@@ -391,7 +410,7 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
 
             // If we got to here, things have apparently not gone according to plan ...
 
-            // Construct an error message 
+            // Construct an error message
             $errmsg = '';
 
             if (empty($registrationParams['Amount']))
@@ -481,7 +500,7 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
 
             $first_contribution_id = $existing['contribution_id'];
 
-            // Use the first installment contribution as the basis for the new one, 
+            // Use the first installment contribution as the basis for the new one,
             // but unset the ids first, so a new record is created
 
             unset($existing['id'], $existing['contribution_id']);
@@ -606,10 +625,10 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
             if (self::getCRMVersion() < 4.3) {
                 CRM_Core_DAO::executeQuery("
                     INSERT INTO civicrm_job (
-                       id, domain_id, run_frequency, last_run, name, description, 
+                       id, domain_id, run_frequency, last_run, name, description,
                        api_prefix, api_entity, api_action, parameters, is_active
                     ) VALUES (
-                       NULL, %1, 'Daily', NULL, 'Process Sagepay Recurring Payments', 
+                       NULL, %1, 'Daily', NULL, 'Process Sagepay Recurring Payments',
                        'Processes any Sagepay recurring payments that are due',
                        'civicrm_api3', 'job', 'run_payment_cron', 'processor_name=Sagepay', 0
                     )
@@ -659,7 +678,7 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
         // Also, remove the entry we created in civicrm_job
         if (CRM_Core_DAO::checkTableExists('civicrm_job'))
             CRM_Core_DAO::executeQuery("
-                DELETE FROM civicrm_job 
+                DELETE FROM civicrm_job
                       WHERE api_entity = 'job'
                         AND api_action = 'run_payment_cron'
             ");
@@ -708,7 +727,7 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
     protected function getIDs() {
         $ids = array();
         $dao = CRM_Core_DAO::executeQuery("
-            SELECT id FROM civicrm_payment_processor 
+            SELECT id FROM civicrm_payment_processor
              WHERE class_name = 'uk.co.circleinteractive.payment.sagepay'
         ");
         while ($dao->fetch())
@@ -716,7 +735,7 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
         return $ids;
     }
 
-    // Send POST request using cURL 
+    // Send POST request using cURL
     protected function requestPost($url, $data){
 
         if (!function_exists('curl_init'))
@@ -789,6 +808,69 @@ class uk_co_circleinteractive_payment_sagepay extends CRM_Core_Payment {
 
             if ($params) {
                 $registrationParams['NotificationURL'] .= '&' . implode('&', $params);
+            }
+        }
+    }
+
+    /**
+     * Creates accounting transaction entities for Pending contribution
+     *
+     * @param int $contributionID
+     */
+    private function createPendingTransaction($contributionID) {
+        // fetch contribution details
+        $contribution = civicrm_api3('Contribution', 'get', [
+          'sequential' => 1,
+          'id' => $contributionID,
+        ])['values'][0];
+
+        if (!empty($contribution['contribution_status']) && $contribution['contribution_status'] == 'Pending') {
+
+            // Create Financial Transaction record
+            $ftrx = civicrm_api3('FinancialTrxn', 'create', [
+              'sequential' => 1,
+              'to_financial_account_id' => 'Accounts Receivable', // debit account
+              'total_amount' => $contribution['total_amount'],
+              'net_amount' => $contribution['total_amount'],
+              'status_id' => $contribution['contribution_status_id'],
+              'payment_instrument_id' => $contribution['payment_instrument'],
+              'trxn_date' => date('Y-m-d H:i:s'),
+              'currency' => $contribution['currency'],
+            ]);
+
+            // Create Financial Transaction Entity record for civicrm_contribution table
+            if (!empty($ftrx['id'])) {
+                civicrm_api3('EntityFinancialTrxn', 'create', [
+                  'sequential' => 1,
+                  'entity_table' => "civicrm_contribution",
+                  'entity_id' => $contributionID,
+                  'financial_trxn_id' => $ftrx['id'],
+                  'amount' => $contribution['total_amount'],
+                ]);
+
+                // Create Financial Transaction Entity record for civicrm_financial_item table
+                $lineItemID = civicrm_api3('LineItem', 'get', [
+                  'sequential' => 1,
+                  'contribution_id' => $contributionID,
+                ])['id'];
+
+                $defaults = null;
+                $params = [
+                  'entity_table' => 'civicrm_line_item',
+                  'entity_id' => $lineItemID,
+                  'amount' => $contribution['total_amount'],
+                ];
+                $financialItem = CRM_Financial_BAO_FinancialItem::retrieve($params, $defaults);
+
+                if (!empty($financialItem->id)) {
+                    civicrm_api3('EntityFinancialTrxn', 'create', [
+                      'sequential' => 1,
+                      'entity_table' => "civicrm_financial_item",
+                      'entity_id' => $financialItem->id,
+                      'financial_trxn_id' => $ftrx['id'],
+                      'amount' => $contribution['total_amount'],
+                    ]);
+                }
             }
         }
     }
