@@ -511,8 +511,8 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
             CURLOPT_SSLVERSION     => CURL_SSLVERSION_TLSv1
         ]);
 
-        // Send request and split response into name/value pairs
-        $response = preg_split(chr(10), curl_exec($session));
+        // Send request and explode response into name/value pairs
+        $response = explode(chr(10), curl_exec($session));
 
         // Check that a connection was made
         if (curl_error($session)){
