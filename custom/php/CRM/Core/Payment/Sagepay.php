@@ -3,7 +3,7 @@
 /**
  * Sagepay Extension for CiviCRM - Circle Interactive 2010-16
  * @author andyw@circle
- * RM: Customisations have been annotated using a custom PHPDoc tag @custom 
+ * RM: Customisations have been annotated using a custom PHPDoc tag @custom
  */
 
 class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
@@ -95,7 +95,7 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
      * Initialize REPEAT transaction
      */
     public function doRepeatCheckout(&$params) {
-        
+
         $repeatParams = array(
             'VPSProtocol'         => '3.00',
             'TxType'              => 'REPEAT',
@@ -182,7 +182,7 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
         $contact = civicrm_api3("Contact", "getsingle", [
             'version'    => '3',
             'contact_id' => $cid
-        ]);        	
+        ]);
 
         // Use billing address when configured to via setting
         if ($use_billing = CRM_Core_BAO_Setting::getItem('uk.co.circleinteractive.payment.sagepay', 'use_billing')) {
@@ -280,7 +280,7 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
         } else {
 
             // Status: not OK
-            // Construct an error message 
+            // Construct an error message
             $errmsg = '';
 
             if (empty($registrationParams['Amount']))
@@ -354,7 +354,7 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
 
         // For each of those ..
         while ($recur->fetch()) {
-            
+
             try {
                 $existing = civicrm_api3("Contribution", "get", [
                     'version'               => '3',
@@ -484,7 +484,7 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
     }
 
     /**
-     * Send POST request using cURL 
+     * Send POST request using cURL
      * @param string $url   url to send data to
      * @param string $data  urlencoded key/value pairs to send
      */
@@ -511,8 +511,8 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
             CURLOPT_SSLVERSION     => CURL_SSLVERSION_TLSv1
         ]);
 
-        // Send request and split response into name/value pairs
-        $response = split(chr(10), curl_exec($session));
+        // Send request and explode response into name/value pairs
+        $response = explode(chr(10), curl_exec($session));
 
         // Check that a connection was made
         if (curl_error($session)){
@@ -556,9 +556,9 @@ class CRM_Core_Payment_Sagepay extends CRM_Core_Payment {
                 1 => [$contribution_status_id['Failed'], 'Integer'],
                 2 => [$contribution_recur_id, 'Integer']
             ]);
-        
+
         }
-    
+
     }
 
 }
